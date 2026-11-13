@@ -24,8 +24,10 @@ jobs:
       - name: Deploy with Docker Compose
         shell: powershell
         run: |
+          docker rm -f notebook-db notebook-app 2>$null
           docker compose down -v
           docker compose up -d --build
+          
           Write-Host "Waiting for services to be healthy..."
           Start-Sleep -Seconds 20
 
