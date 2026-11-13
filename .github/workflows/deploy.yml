@@ -14,62 +14,62 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Create .env file from secrets
+        shell: powershell
         run: |
-          echo "DB_USER=${{ secrets.DB_USER }}" > .env
-          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
-          echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
-          echo ".env file created successfully."
-
+          "DB_USER=${{ secrets.DB_USER }}" | Out-File -FilePath .env -Encoding utf8
+          "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" | Out-File -FilePath .env -Encoding utf8 -Append
+          "DB_NAME=${{ secrets.DB_NAME }}" | Out-File -FilePath .env -Encoding utf8 -Append
+          Write-Host ".env file created successfully."
 
       - name: Deploy with Docker Compose
+        shell: powershell
         run: |
           docker compose down -v
           docker compose up -d --build
-          echo "Waiting for services to be healthy..."
+          Write-Host "Waiting for services to be healthy..."
           Start-Sleep -Seconds 20
 
       - name: Verify containers are running
+        shell: powershell
         run: |
           docker compose ps
-          # В PowerShell нет grep, используем Select-String
           $psOutput = docker compose ps
           if ($psOutput -match "Exit") {
-            echo "Some containers failed to start. Logs:"
+            Write-Host "Some containers failed to start. Logs:"
             docker compose logs
             exit 1
           }
-          echo "All containers are running."
+          Write-Host "All containers are running."
 
       - name: Test application and database
+        shell: powershell
         run: |
-          echo "--- Test 1: Application Health ---"
+          Write-Host "--- Test 1: Application Health ---"
           try {
             $response = Invoke-WebRequest -Uri "http://localhost:8080/" -UseBasicParsing
             if ($response.StatusCode -eq 200) {
-              echo "Web application is responding on port 8080"
+              Write-Host "Web application is responding on port 8080"
             }
           } catch {
-            echo "Web application is not responding"
+            Write-Host "Web application is not responding"
             exit 1
           }
 
-          echo "--- Test 2: Data consistency ---"
+          Write-Host "--- Test 2: Data consistency ---"
           
-          # Получаем данные из БД
           $dbCountRaw = docker compose exec -T db psql -U ${{ secrets.DB_USER }} -d ${{ secrets.DB_NAME }} -t -c "SELECT COUNT(*) FROM notes;"
           $dbCount = $dbCountRaw.Trim()
 
-          # Получаем данные из API
           $apiResponse = Invoke-RestMethod -Uri "http://localhost:8080/api/notes"
           $webCount = $apiResponse.Count
           
-          echo "Database notes count: $dbCount"
-          echo "Web API notes count:   $webCount"
+          Write-Host "Database notes count: $dbCount"
+          Write-Host "Web API notes count:   $webCount"
 
           if ([int]$dbCount -eq [int]$webCount) {
-            echo "Data consistency test PASSED. The database and web interface show the same data."
+            Write-Host "Data consistency test PASSED. The database and web interface show the same data."
           } else {
-            echo "Data consistency test FAILED. Mismatch in counts."
+            Write-Host "Data consistency test FAILED. Mismatch in counts."
             exit 1
           }
 
@@ -84,6 +84,7 @@ jobs:
           retention-days: 7
 
       - name: Save Docker logs
+        shell: powershell
         if: always()
         run: |
           docker compose logs > deployment-logs.txt
