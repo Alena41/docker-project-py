@@ -19,50 +19,59 @@ jobs:
           echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
           echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
           echo ".env file created successfully."
-          cat .env | sed 's/=.*/=***/'
+
 
       - name: Deploy with Docker Compose
         run: |
-          docker-compose down -v || true
-          docker-compose up -d --build
+          docker compose down -v
+          docker compose up -d --build
           echo "Waiting for services to be healthy..."
-          sleep 20
+          Start-Sleep -Seconds 20
 
       - name: Verify containers are running
         run: |
-          docker-compose ps
-          if docker-compose ps | grep -i "exit"; then
+          docker compose ps
+          # В PowerShell нет grep, используем Select-String
+          $psOutput = docker compose ps
+          if ($psOutput -match "Exit") {
             echo "Some containers failed to start. Logs:"
-            docker-compose logs
+            docker compose logs
             exit 1
-          fi
+          }
           echo "All containers are running."
 
       - name: Test application and database
         run: |
           echo "--- Test 1: Application Health ---"
-          if curl -f http://localhost:8080/; then
-            echo "Web application is responding on port 8080"
-          else
+          try {
+            $response = Invoke-WebRequest -Uri "http://localhost:8080/" -UseBasicParsing
+            if ($response.StatusCode -eq 200) {
+              echo "Web application is responding on port 8080"
+            }
+          } catch {
             echo "Web application is not responding"
             exit 1
-          fi
+          }
 
           echo "--- Test 2: Data consistency ---"
           
-          DB_COUNT=$(docker-compose exec -T db psql -U ${{ secrets.DB_USER }} -d ${{ secrets.DB_NAME }} -t -c "SELECT COUNT(*) FROM notes;" | tr -d ' ')
-          
-          WEB_COUNT=$(curl -s http://localhost:8080/api/notes | python -c "import sys, json; print(len(json.load(sys.stdin)))")
-          
-          echo "Database notes count: $DB_COUNT"
-          echo "Web API notes count:   $WEB_COUNT"
+          # Получаем данные из БД
+          $dbCountRaw = docker compose exec -T db psql -U ${{ secrets.DB_USER }} -d ${{ secrets.DB_NAME }} -t -c "SELECT COUNT(*) FROM notes;"
+          $dbCount = $dbCountRaw.Trim()
 
-          if [ "$DB_COUNT" -eq "$WEB_COUNT" ]; then
+          # Получаем данные из API
+          $apiResponse = Invoke-RestMethod -Uri "http://localhost:8080/api/notes"
+          $webCount = $apiResponse.Count
+          
+          echo "Database notes count: $dbCount"
+          echo "Web API notes count:   $webCount"
+
+          if ([int]$dbCount -eq [int]$webCount) {
             echo "Data consistency test PASSED. The database and web interface show the same data."
-          else
+          } else {
             echo "Data consistency test FAILED. Mismatch in counts."
             exit 1
-          fi
+          }
 
       - name: Save artifacts
         uses: actions/upload-artifact@v4
@@ -77,7 +86,7 @@ jobs:
       - name: Save Docker logs
         if: always()
         run: |
-          docker-compose logs > deployment-logs.txt
+          docker compose logs > deployment-logs.txt
 
       - name: Upload Docker logs
         uses: actions/upload-artifact@v4
