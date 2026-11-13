@@ -1,0 +1,88 @@
+name: Deploy and Test Notebook App
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy-and-test:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create .env file from secrets
+        run: |
+          echo "DB_USER=${{ secrets.DB_USER }}" > .env
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+          echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
+          echo ".env file created successfully."
+          cat .env | sed 's/=.*/=***/'
+
+      - name: Deploy with Docker Compose
+        run: |
+          docker-compose down -v || true
+          docker-compose up -d --build
+          echo "Waiting for services to be healthy..."
+          sleep 20
+
+      - name: Verify containers are running
+        run: |
+          docker-compose ps
+          if docker-compose ps | grep -i "exit"; then
+            echo "Some containers failed to start. Logs:"
+            docker-compose logs
+            exit 1
+          fi
+          echo "All containers are running."
+
+      - name: Test application and database
+        run: |
+          echo "--- Test 1: Application Health ---"
+          if curl -f http://localhost:8080/; then
+            echo "Web application is responding on port 8080"
+          else
+            echo "Web application is not responding"
+            exit 1
+          fi
+
+          echo "--- Test 2: Data consistency ---"
+          
+          DB_COUNT=$(docker-compose exec -T db psql -U ${{ secrets.DB_USER }} -d ${{ secrets.DB_NAME }} -t -c "SELECT COUNT(*) FROM notes;" | tr -d ' ')
+          
+          WEB_COUNT=$(curl -s http://localhost:8080/api/notes | python -c "import sys, json; print(len(json.load(sys.stdin)))")
+          
+          echo "Database notes count: $DB_COUNT"
+          echo "Web API notes count:   $WEB_COUNT"
+
+          if [ "$DB_COUNT" -eq "$WEB_COUNT" ]; then
+            echo "Data consistency test PASSED. The database and web interface show the same data."
+          else
+            echo "Data consistency test FAILED. Mismatch in counts."
+            exit 1
+          fi
+
+      - name: Save artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deployment-artifacts
+          path: |
+            .env
+            docker-compose.yml
+          retention-days: 7
+
+      - name: Save Docker logs
+        if: always()
+        run: |
+          docker-compose logs > deployment-logs.txt
+
+      - name: Upload Docker logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-logs
+          path: deployment-logs.txt
+          retention-days: 7
