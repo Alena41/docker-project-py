@@ -27,7 +27,6 @@ jobs:
           docker rm -f notebook-db notebook-app 2>$null
           docker compose down -v
           docker compose up -d --build
-          
           Write-Host "Waiting for services to be healthy..."
           Start-Sleep -Seconds 20
 
@@ -68,7 +67,7 @@ jobs:
           Write-Host "Database notes count: $dbCount"
           Write-Host "Web API notes count:   $webCount"
 
-          if ([int]$dbCount -eq [int]$webCount) {
+          if ($dbCount -eq $webCount) {
             Write-Host "Data consistency test PASSED. The database and web interface show the same data."
           } else {
             Write-Host "Data consistency test FAILED. Mismatch in counts."
